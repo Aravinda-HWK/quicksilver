@@ -5,7 +5,16 @@ import ThreadList from "../moles/ThreadList";
 import { useData } from "../../nonview/core/DataContext";
 
 function TrashPage() {
-  const { trashedThreads, loading } = useData();
+  const {
+    trashedThreads,
+    loading,
+    page,
+    total,
+    pageSize,
+    pageLoading,
+    nextPage,
+    prevPage,
+  } = useData();
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredThreads = trashedThreads.filter((thread) => {
@@ -31,6 +40,12 @@ function TrashPage() {
         emptyMessage={
           searchQuery ? "No trash items match your search" : "Trash is empty"
         }
+        page={page.trash || 0}
+        total={total.trash || 0}
+        pageSize={pageSize}
+        pageLoading={pageLoading.trash}
+        onNext={searchQuery ? undefined : () => nextPage("trash")}
+        onPrev={searchQuery ? undefined : () => prevPage("trash")}
       />
     </AppLayout>
   );

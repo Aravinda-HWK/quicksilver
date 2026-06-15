@@ -5,7 +5,16 @@ import ThreadList from "../moles/ThreadList";
 import { useData } from "../../nonview/core/DataContext";
 
 function SentPage() {
-  const { sentThreads, loading } = useData();
+  const {
+    sentThreads,
+    loading,
+    page,
+    total,
+    pageSize,
+    pageLoading,
+    nextPage,
+    prevPage,
+  } = useData();
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredThreads = sentThreads.filter((thread) => {
@@ -31,6 +40,12 @@ function SentPage() {
         emptyMessage={
           searchQuery ? "No sent emails match your search" : "No sent emails"
         }
+        page={page.sent || 0}
+        total={total.sent || 0}
+        pageSize={pageSize}
+        pageLoading={pageLoading.sent}
+        onNext={searchQuery ? undefined : () => nextPage("sent")}
+        onPrev={searchQuery ? undefined : () => prevPage("sent")}
       />
     </AppLayout>
   );

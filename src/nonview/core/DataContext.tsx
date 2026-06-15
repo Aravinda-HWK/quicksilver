@@ -9,11 +9,20 @@ import React, {
 } from "react";
 import { useAuth } from "./AuthContext";
 import { mailboxes as mailboxesAPI, messages as messagesAPI } from "../api/endpoints";
+import {
+  readThreads,
+  writeThreads,
+  removeThread,
+  patchThread,
+  readBody,
+  writeBody,
+} from "../cache/db";
 import type {
   Address,
   Envelope,
   Mailbox,
   Message,
+  MessageListResponse,
 } from "../api/types";
 
 // Thread is the shape consumed by existing UI components. Each backend
@@ -77,9 +86,21 @@ interface DataContextValue {
   loading: boolean;
   error: string | null;
   unreadCount: number;
+  // Page-based pagination keyed by role ("inbox" | "sent" | "drafts" | "trash").
+  // page[role] is the 0-based current page; total[role] is the mailbox's full
+  // message count; pageLoading[role] is true while a page is being fetched.
+  page: Record<string, number>;
+  total: Record<string, number>;
+  pageLoading: Record<string, boolean>;
+  pageSize: number;
+  // Move one page older / newer, replacing the folder's visible messages.
+  nextPage: (role: string) => Promise<void>;
+  prevPage: (role: string) => Promise<void>;
   refresh: () => Promise<void>;
   getThread: (id: string) => Thread | undefined;
   getMessages: (threadId: string) => Promise<ThreadMessage[]>;
+  // Cache-first body read; returns null if nothing is cached for the thread.
+  getCachedMessages: (threadId: string) => Promise<ThreadMessage[] | null>;
   sendEmail: (data: EmailData) => Promise<{ status: string }>;
   saveDraft: (data: DraftData) => Promise<Thread>;
   deleteThread: (threadId: string) => Promise<void>;
@@ -104,6 +125,9 @@ const ROLE_NAMES: Record<string, string[]> = {
   drafts: ["Drafts", "[Gmail]/Drafts"],
   trash: ["Trash", "Deleted Items", "[Gmail]/Trash"],
 };
+
+// How many envelopes to show per page (matches the backend default).
+const PAGE_SIZE = 50;
 
 // Resolves the actual mailbox names served by the user's provider against
 // well-known role hints (set by the IMAP \\Special-Use flags or, failing that,
@@ -187,7 +211,11 @@ interface DataProviderProps {
 }
 
 export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
-  const { apiClient, isAuthenticated } = useAuth();
+  const { apiClient, isAuthenticated, currentUser } = useAuth();
+
+  // Cache scope. Every IndexedDB read/write is namespaced by the signed-in
+  // address so a shared browser never mixes two accounts' mail.
+  const account = currentUser?.email || "";
 
   const [mailboxList, setMailboxList] = useState<Mailbox[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -197,13 +225,45 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Pagination bookkeeping per folder role.
+  const [page, setPage] = useState<Record<string, number>>({});
+  const [total, setTotal] = useState<Record<string, number>>({});
+  const [pageLoading, setPageLoading] = useState<Record<string, boolean>>({});
+  // pageCursors[role][i] is the `before` UID used to fetch page i (index 0 is
+  // undefined = newest). Discovered as the user pages forward, reused for back.
+  const pageCursors = useRef<Record<string, (number | undefined)[]>>({});
+
   // Cache of role → mailbox name resolution so handlers can post to the right
   // folder without a fresh mailboxes call each time.
   const rolesRef = useRef<Record<string, string>>({});
 
+  // Paint the mailbox list from IndexedDB before any network call. Returns
+  // whether the cache held anything, so the network load knows whether it
+  // still needs to show a blocking spinner (cold start) or can refresh quietly.
+  const hydrateFromCache = useCallback(async (): Promise<boolean> => {
+    if (!account) return false;
+    const [inbox, sent, draftsC, trash] = await Promise.all([
+      readThreads(account, "inbox"),
+      readThreads(account, "sent"),
+      readThreads(account, "drafts"),
+      readThreads(account, "trash"),
+    ]);
+    if (inbox.length) setThreads(inbox);
+    if (sent.length) setSentThreads(sent);
+    if (draftsC.length) setDrafts(draftsC);
+    if (trash.length) setTrashedThreads(trash);
+    return (
+      inbox.length + sent.length + draftsC.length + trash.length > 0
+    );
+  }, [account]);
+
   const loadAll = useCallback(
-    async (signal?: AbortSignal): Promise<void> => {
-      setLoading(true);
+    async (
+      signal?: AbortSignal,
+      opts: { showSpinner?: boolean } = {},
+    ): Promise<void> => {
+      // On a warm cache we refresh in the background — no blocking spinner.
+      if (opts.showSpinner !== false) setLoading(true);
       setError(null);
       try {
         const resp = await mailboxesAPI.list(apiClient, signal);
@@ -216,30 +276,44 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
         // the successful folders' data.
         const settled = await Promise.allSettled([
           roles.inbox
-            ? mailboxesAPI.listMessages(apiClient, roles.inbox, { limit: 50 }, signal)
+            ? mailboxesAPI.listMessages(apiClient, roles.inbox, { limit: PAGE_SIZE }, signal)
             : Promise.resolve({ messages: [] }),
           roles.sent
-            ? mailboxesAPI.listMessages(apiClient, roles.sent, { limit: 50 }, signal)
+            ? mailboxesAPI.listMessages(apiClient, roles.sent, { limit: PAGE_SIZE }, signal)
             : Promise.resolve({ messages: [] }),
           roles.drafts
-            ? mailboxesAPI.listMessages(apiClient, roles.drafts, { limit: 50 }, signal)
+            ? mailboxesAPI.listMessages(apiClient, roles.drafts, { limit: PAGE_SIZE }, signal)
             : Promise.resolve({ messages: [] }),
           roles.trash
-            ? mailboxesAPI.listMessages(apiClient, roles.trash, { limit: 50 }, signal)
+            ? mailboxesAPI.listMessages(apiClient, roles.trash, { limit: PAGE_SIZE }, signal)
             : Promise.resolve({ messages: [] }),
         ]);
 
-        const fold = (idx: number, mailbox: string | undefined) =>
-          settled[idx].status === "fulfilled"
-            ? ((settled[idx] as PromiseFulfilledResult<{ messages: Envelope[] }>).value
-                .messages || []
-              ).map((e) => envelopeToThread(e, mailbox || ""))
-            : [];
+        // Apply a folder's fresh first page (page 0) to React state and the
+        // cache, and seed its pagination bookkeeping — but only when the fetch
+        // succeeded, so a rejected fetch never clobbers good cached rows.
+        const apply = (
+          idx: number,
+          role: string,
+          mailbox: string | undefined,
+          set: React.Dispatch<React.SetStateAction<Thread[]>>,
+        ) => {
+          if (settled[idx].status !== "fulfilled") return; // keep cached rows
+          const val = (settled[idx] as PromiseFulfilledResult<MessageListResponse>).value;
+          const msgs = val.messages || [];
+          const fresh = msgs.map((e) => envelopeToThread(e, mailbox || ""));
+          set(fresh);
+          void writeThreads(account, role, fresh);
+          // Reset to page 0; cursor for page 1 is this page's next_before.
+          pageCursors.current[role] = [undefined, val.next_before];
+          setPage((p) => ({ ...p, [role]: 0 }));
+          setTotal((t) => ({ ...t, [role]: val.total ?? msgs.length }));
+        };
 
-        setThreads(fold(0, roles.inbox));
-        setSentThreads(fold(1, roles.sent));
-        setDrafts(fold(2, roles.drafts));
-        setTrashedThreads(fold(3, roles.trash));
+        apply(0, "inbox", roles.inbox, setThreads);
+        apply(1, "sent", roles.sent, setSentThreads);
+        apply(2, "drafts", roles.drafts, setDrafts);
+        apply(3, "trash", roles.trash, setTrashedThreads);
 
         const failed = settled
           .map((s, i) => ({ s, i }))
@@ -257,7 +331,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
         setLoading(false);
       }
     },
-    [apiClient],
+    [apiClient, account],
   );
 
   useEffect(() => {
@@ -270,11 +344,99 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
       return;
     }
     const ctrl = new AbortController();
-    void loadAll(ctrl.signal);
+    // Cache-first: paint from IndexedDB immediately, then refresh from the
+    // network without a blocking spinner if the cache already had something.
+    void (async () => {
+      const hadCache = await hydrateFromCache();
+      await loadAll(ctrl.signal, { showSpinner: !hadCache });
+    })();
     return () => ctrl.abort();
-  }, [isAuthenticated, loadAll]);
+  }, [isAuthenticated, loadAll, hydrateFromCache]);
 
   const refresh = useCallback(() => loadAll(), [loadAll]);
+
+  // Maps a role to its current thread array's state setter.
+  const setterForRole = useCallback(
+    (role: string): React.Dispatch<React.SetStateAction<Thread[]>> | null => {
+      switch (role) {
+        case "inbox":
+          return setThreads;
+        case "sent":
+          return setSentThreads;
+        case "trash":
+          return setTrashedThreads;
+        case "drafts":
+          return setDrafts;
+        default:
+          return null;
+      }
+    },
+    [],
+  );
+
+  // Fetch one page of a folder and REPLACE the visible messages with it (unlike
+  // infinite scroll, which appends). `target` is the destination page index;
+  // `before` is the cursor for that page (undefined = newest/page 0).
+  const fetchPage = useCallback(
+    async (role: string, target: number, before: number | undefined): Promise<void> => {
+      const mailbox = rolesRef.current[role];
+      const set = setterForRole(role);
+      if (!mailbox || !set) return;
+
+      setPageLoading((m) => ({ ...m, [role]: true }));
+      try {
+        const resp = await mailboxesAPI.listMessages(apiClient, mailbox, {
+          limit: PAGE_SIZE,
+          ...(before ? { before } : {}),
+        });
+        const msgs = resp.messages || [];
+        const fresh = msgs.map((e) => envelopeToThread(e, mailbox));
+        set(fresh);
+        setPage((p) => ({ ...p, [role]: target }));
+        if (resp.total !== undefined) {
+          setTotal((t) => ({ ...t, [role]: resp.total as number }));
+        }
+        // Record the cursor for the *next* page so a later nextPage knows it.
+        const cursors = pageCursors.current[role] || [undefined];
+        cursors[target + 1] = resp.next_before;
+        pageCursors.current[role] = cursors;
+        // Only page 0 is mirrored to the offline cache (the "newest" view).
+        if (target === 0) void writeThreads(account, role, fresh);
+      } catch (err) {
+        if ((err as { name?: string })?.name !== "AbortError") {
+          setError((err as Error).message || "Failed to load page");
+        }
+      } finally {
+        setPageLoading((m) => ({ ...m, [role]: false }));
+      }
+    },
+    [apiClient, account, setterForRole],
+  );
+
+  const nextPage = useCallback(
+    async (role: string): Promise<void> => {
+      if (pageLoading[role]) return;
+      const cur = page[role] ?? 0;
+      const target = cur + 1;
+      // Don't page past the end.
+      if (target * PAGE_SIZE >= (total[role] ?? 0)) return;
+      const before = (pageCursors.current[role] || [])[target];
+      await fetchPage(role, target, before);
+    },
+    [page, total, pageLoading, fetchPage],
+  );
+
+  const prevPage = useCallback(
+    async (role: string): Promise<void> => {
+      if (pageLoading[role]) return;
+      const cur = page[role] ?? 0;
+      if (cur <= 0) return;
+      const target = cur - 1;
+      const before = (pageCursors.current[role] || [])[target];
+      await fetchPage(role, target, before);
+    },
+    [page, pageLoading, fetchPage],
+  );
 
   const allThreads = useMemo(
     () => [...threads, ...sentThreads, ...drafts, ...trashedThreads],
@@ -290,10 +452,24 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
     async (threadId: string): Promise<ThreadMessage[]> => {
       const parsed = parseThreadID(threadId);
       if (!parsed) return [];
+      // Fetch from the network and refresh the cache.
       const msg = await messagesAPI.get(apiClient, parsed.mailbox, parsed.uid);
-      return [messageToThreadMessage(msg)];
+      const tm = messageToThreadMessage(msg);
+      void writeBody(account, threadId, tm);
+      return [tm];
     },
-    [apiClient],
+    [apiClient, account],
+  );
+
+  // Cache-first body read for the read view: returns the cached body instantly
+  // (or null on a cold thread) so ThreadPage can paint before the network
+  // round-trip completes, then revalidate via getMessages.
+  const getCachedMessages = useCallback(
+    async (threadId: string): Promise<ThreadMessage[] | null> => {
+      const cached = await readBody(account, threadId);
+      return cached ? [cached] : null;
+    },
+    [account],
   );
 
   const sendEmail = useCallback(
@@ -357,31 +533,61 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
       const parsed = parseThreadID(threadId);
       if (!parsed) return;
       const trash = rolesRef.current.trash || "Trash";
-      await messagesAPI.remove(apiClient, parsed.mailbox, parsed.uid, trash);
+
+      // Optimistic: remove from the list (and cache) immediately, then call the
+      // server. Snapshot first so we can roll back if the delete fails.
+      const snapshot = { threads, sentThreads, drafts };
       const remove = (list: Thread[]) => list.filter((t) => t.id !== threadId);
       setThreads(remove);
       setSentThreads(remove);
       setDrafts(remove);
+      void removeThread(account, threadId);
+
+      try {
+        await messagesAPI.remove(apiClient, parsed.mailbox, parsed.uid, trash);
+      } catch (err) {
+        // Roll back to the pre-delete state on failure.
+        setThreads(snapshot.threads);
+        setSentThreads(snapshot.sentThreads);
+        setDrafts(snapshot.drafts);
+        void writeThreads(account, "inbox", snapshot.threads);
+        throw err;
+      }
     },
-    [apiClient],
+    [apiClient, account, threads, sentThreads, drafts],
   );
 
   const markAsRead = useCallback(
     async (threadId: string): Promise<void> => {
       const parsed = parseThreadID(threadId);
       if (!parsed) return;
-      await messagesAPI.setFlags(
-        apiClient,
-        parsed.mailbox,
-        parsed.uid,
-        ["\\Seen"],
-        true,
-      );
+
+      // Optimistic: clear the unread badge instantly in state and cache.
       setThreads((prev) =>
         prev.map((t) => (t.id === threadId ? { ...t, unreadCount: 0 } : t)),
       );
+      void patchThread(account, threadId, { unreadCount: 0 });
+
+      try {
+        await messagesAPI.setFlags(
+          apiClient,
+          parsed.mailbox,
+          parsed.uid,
+          ["\\Seen"],
+          true,
+        );
+      } catch (err) {
+        // Restore the unread badge if the flag update didn't stick.
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.id === threadId ? { ...t, unreadCount: 1 } : t,
+          ),
+        );
+        void patchThread(account, threadId, { unreadCount: 1 });
+        throw err;
+      }
     },
-    [apiClient],
+    [apiClient, account],
   );
 
   const sendMessage = useCallback(
@@ -427,9 +633,16 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
     loading,
     error,
     unreadCount,
+    page,
+    total,
+    pageLoading,
+    pageSize: PAGE_SIZE,
+    nextPage,
+    prevPage,
     refresh,
     getThread,
     getMessages,
+    getCachedMessages,
     sendEmail,
     saveDraft,
     deleteThread,
