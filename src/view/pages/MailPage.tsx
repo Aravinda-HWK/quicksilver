@@ -60,16 +60,65 @@ function MailPage() {
       actions={isDesktop ? [{ icon: EditIcon, label: "Compose", onClick: () => openCompose() }] : []}
     >
       {isDesktop ? (
-        <Box sx={{ display: "flex", height: "100%" }}>
-          <Box sx={{ width: 350, borderRight: 1, borderColor: "divider", height: "100%", flexShrink: 0 }}>
+        // Dark mode paints the whole split on the "deep space" gradient; the
+        // sidebar becomes a translucent glass panel over it.
+        <Box
+          sx={(muiTheme) => ({
+            display: "flex",
+            height: "100%",
+            ...muiTheme.applyStyles("dark", {
+              background:
+                "radial-gradient(circle at 50% 0%, #1A1A2E 0%, #0E0E0F 100%)",
+            }),
+          })}
+        >
+          {/* Sidebar is a frosted glass panel in both schemes (DESIGN.md,
+              "The HUD Layer"). */}
+          <Box
+            sx={(muiTheme) => ({
+              width: 360,
+              borderRight: 1,
+              borderColor: "divider",
+              height: "100%",
+              flexShrink: 0,
+              backgroundColor: "rgba(255, 255, 255, 0.6)",
+              backdropFilter: "blur(20px)",
+              ...muiTheme.applyStyles("dark", {
+                backgroundColor: "rgba(255, 255, 255, 0.02)",
+              }),
+            })}
+          >
             {list}
           </Box>
-          <Box sx={{ flex: 1, height: "100%", overflow: "hidden" }}>
+          {/* Conversation pane: slightly more opaque surface so the two panes
+              read as distinct glass layers. */}
+          <Box
+            sx={(muiTheme) => ({
+              flex: 1,
+              height: "100%",
+              overflow: "hidden",
+              background: "rgba(255, 255, 255, 0.5)",
+              ...muiTheme.applyStyles("dark", {
+                background: "rgba(0, 0, 0, 0.2)",
+              }),
+            })}
+          >
             {matchThread ? <Outlet /> : <EmptyState title="Select an email to read" />}
           </Box>
         </Box>
       ) : matchThread ? (
-        <Outlet />
+        <Box
+          sx={(muiTheme) => ({
+            height: "100%",
+            background: "rgba(255, 255, 255, 0.5)",
+            ...muiTheme.applyStyles("dark", {
+              background:
+                "radial-gradient(circle at 50% 0%, #1A1A2E 0%, #0E0E0F 100%)",
+            }),
+          })}
+        >
+          <Outlet />
+        </Box>
       ) : (
         list
       )}

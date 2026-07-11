@@ -10,13 +10,12 @@ const ThreadListSkeletonRow: React.FC = () => (
   <Box
     sx={{
       display: "flex",
-      gap: 2,
-      p: 2,
-      borderBottom: 1,
-      borderColor: "divider",
+      gap: 1.5,
+      px: 2,
+      py: 1.5,
     }}
   >
-    <Skeleton variant="circular" width={40} height={40} />
+    <Skeleton variant="circular" width={44} height={44} />
     <Box sx={{ flex: 1, minWidth: 0 }}>
       <Box
         sx={{
