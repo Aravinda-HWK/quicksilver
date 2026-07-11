@@ -12,6 +12,8 @@ const MessageMeta = ({ timestamp, isRead, isSent }) => {
         gap: 0.5,
         justifyContent: isSent ? "flex-end" : "flex-start",
         mt: 0.5,
+        // Metadata is present but secondary (DESIGN.md, Typography).
+        opacity: 0.7,
       }}
     >
       <Timestamp date={timestamp} format="time-only" />

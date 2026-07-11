@@ -1,6 +1,6 @@
 import React from "react";
-import { Box, Typography, Avatar, Badge } from "@mui/material";
-import { getInitials } from "../_constants/avatarUtils";
+import { Box, Typography, Avatar } from "@mui/material";
+import { getInitials, getAvatarColor } from "../_constants/avatarUtils";
 import Timestamp from "../atoms/Timestamp";
 import AttachFileIcon from "@mui/icons-material/AttachFile";
 
@@ -26,21 +26,36 @@ const ThreadListItem = ({ thread, isSelected = false, onClick, onPrefetch = unde
       onMouseEnter={onPrefetch ? () => onPrefetch(id) : undefined}
       onFocus={onPrefetch ? () => onPrefetch(id) : undefined}
       sx={{
+        position: "relative",
         display: "flex",
-        gap: 2,
-        p: 2,
+        gap: 1.5,
+        px: 2,
+        py: 1.5,
         cursor: "pointer",
         backgroundColor: isSelected ? "action.selected" : "transparent",
-        borderBottom: 1,
-        borderColor: "divider",
         "&:hover": {
           backgroundColor: isSelected ? "action.selected" : "action.hover",
         },
-        transition: "background-color 0.2s",
+        transition: "background-color 0.15s",
+        // Selected accent bar — electric cyan with an LED glow, flush with
+        // the pane edge (DESIGN.md, Status Indicators).
+        "&::before": {
+          content: '""',
+          position: "absolute",
+          left: 0,
+          top: 6,
+          bottom: 6,
+          width: 3,
+          borderRadius: "0 3px 3px 0",
+          backgroundColor: "#00F2FF",
+          boxShadow: "0 0 10px rgba(0, 242, 255, 0.5)",
+          opacity: isSelected ? 1 : 0,
+          transition: "opacity 0.15s",
+        },
       }}
     >
       {/* Avatar */}
-      <Avatar sx={{ width: 40, height: 40 }}>
+      <Avatar sx={{ width: 44, height: 44, fontSize: "1rem", ...getAvatarColor(participantName) }}>
         {getInitials(participantName)}
       </Avatar>
 
@@ -51,30 +66,41 @@ const ThreadListItem = ({ thread, isSelected = false, onClick, onPrefetch = unde
           sx={{
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "center",
-            mb: 0.5,
+            alignItems: "baseline",
+            gap: 1,
+            mb: 0.25,
           }}
         >
           <Typography
             variant="body1"
             sx={{
-              fontWeight: isUnread ? 600 : 400,
-              color: isUnread ? "text.primary" : "text.primary",
+              fontWeight: isUnread ? 700 : 500,
+              fontSize: "0.9375rem",
             }}
             noWrap
           >
             {participantName}
           </Typography>
-          <Timestamp date={lastMessageTime} format="relative" />
+          <Box
+            sx={{
+              flexShrink: 0,
+              "& .MuiTypography-root": {
+                color: isUnread ? "primary.main" : "text.secondary",
+                fontWeight: isUnread ? 700 : 500,
+              },
+            }}
+          >
+            <Timestamp date={lastMessageTime} format="relative" />
+          </Box>
         </Box>
 
         {/* Second Row: Subject */}
         <Typography
           variant="body2"
           sx={{
-            fontWeight: isUnread ? 600 : 400,
-            color: "text.primary",
-            mb: 0.5,
+            fontWeight: isUnread ? 700 : 400,
+            color: isUnread ? "primary.main" : "text.primary",
+            mb: 0.25,
           }}
           noWrap
         >
@@ -87,23 +113,44 @@ const ThreadListItem = ({ thread, isSelected = false, onClick, onPrefetch = unde
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            gap: 1,
           }}
         >
           <Typography
             variant="body2"
             color="text.secondary"
-            sx={{ flex: 1, minWidth: 0 }}
+            sx={{ flex: 1, minWidth: 0, opacity: 0.85, fontSize: "0.8125rem" }}
             noWrap
           >
             {lastMessage}
           </Typography>
 
-          <Box sx={{ display: "flex", gap: 1, alignItems: "center", ml: 1, mr: 1.5 }}>
+          <Box sx={{ display: "flex", gap: 0.75, alignItems: "center", flexShrink: 0 }}>
             {hasAttachment && (
               <AttachFileIcon sx={{ fontSize: 16, color: "text.secondary" }} />
             )}
             {unreadCount > 0 && (
-              <Badge badgeContent={unreadCount} color="primary" sx={{ mr: 1 }} />
+              <Box
+                sx={{
+                  minWidth: 20,
+                  height: 20,
+                  px: 0.75,
+                  borderRadius: 999,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  // Electric-cyan LED badge with deep-navy count, glowing in
+                  // both schemes (reference mock's "12 NEW" chip).
+                  backgroundColor: "#00F2FF",
+                  color: "#002022",
+                  fontSize: "0.6875rem",
+                  fontWeight: 700,
+                  lineHeight: 1,
+                  boxShadow: "0 0 12px rgba(0, 242, 255, 0.35)",
+                }}
+              >
+                {unreadCount}
+              </Box>
             )}
           </Box>
         </Box>

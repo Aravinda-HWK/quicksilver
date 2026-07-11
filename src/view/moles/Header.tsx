@@ -8,7 +8,11 @@ import {
   useTheme,
   IconButton,
   Avatar,
+  Tooltip,
 } from "@mui/material";
+import { useColorScheme } from "@mui/material/styles";
+import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
+import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import { useNavigate } from "react-router-dom";
 import { useAccount } from "../../nonview/core/AccountContext";
 import { getInitials } from "../_constants/avatarUtils";
@@ -27,6 +31,8 @@ const Header = ({
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const navigate = useNavigate();
   const { activeAccount } = useAccount();
+  const { mode, systemMode, setMode } = useColorScheme();
+  const resolvedMode = (mode === "system" ? systemMode : mode) || "light";
 
   const TitleIcon = titleIcon;
 
@@ -35,23 +41,51 @@ const Header = ({
       position="static"
       color="default"
       elevation={0}
-      sx={{
+      sx={(muiTheme) => ({
         borderBottom: 1,
         borderColor: "divider",
-        backgroundColor: "background.paper",
-      }}
+        // Frosted HUD bar (DESIGN.md, Elevation & Depth).
+        backgroundColor: "rgba(247, 249, 251, 0.8)",
+        backdropFilter: "blur(20px)",
+        ...muiTheme.applyStyles("dark", {
+          backgroundColor: "rgba(19, 19, 20, 0.8)",
+        }),
+      })}
     >
-      <Toolbar sx={{ justifyContent: "space-between" }}>
-        {/* Title */}
+      <Toolbar sx={{ justifyContent: "space-between", minHeight: { xs: 56, md: 60 }, gap: 1 }}>
+        {/* Wordmark */}
         <Box
           sx={{
             display: "flex",
             alignItems: "center",
+            gap: 1.25,
             flex: 1,
+            minWidth: 0,
           }}
         >
-          {TitleIcon && <TitleIcon sx={{ mr: 1, color: "text.secondary" }} />}
-          <Typography variant="h6" component="h1">
+          {TitleIcon && (
+            <Box
+              sx={{
+                width: 34,
+                height: 34,
+                borderRadius: 2.5,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                color: "primary.main",
+                backgroundColor: "action.selected",
+              }}
+            >
+              <TitleIcon sx={{ fontSize: 20 }} />
+            </Box>
+          )}
+          <Typography
+            variant="h6"
+            component="h1"
+            noWrap
+            sx={{ letterSpacing: "-0.02em" }}
+          >
             {title}
           </Typography>
         </Box>
@@ -72,25 +106,42 @@ const Header = ({
             alignItems: "center",
             justifyContent: "flex-end",
             flex: 1,
+            gap: 0.5,
           }}
         >
           {actions.map((action, index) => {
             const ActionIcon = action.icon;
             return (
-              <IconButton
-                key={index}
-                onClick={action.onClick}
-                aria-label={action.label}
-              >
-                <ActionIcon />
-              </IconButton>
+              <Tooltip key={index} title={action.label || ""}>
+                <IconButton
+                  onClick={action.onClick}
+                  aria-label={action.label}
+                  sx={{ color: "text.secondary" }}
+                >
+                  <ActionIcon />
+                </IconButton>
+              </Tooltip>
             );
           })}
+
+          <Tooltip title={resolvedMode === "dark" ? "Light mode" : "Dark mode"}>
+            <IconButton
+              onClick={() => setMode(resolvedMode === "dark" ? "light" : "dark")}
+              aria-label="toggle color scheme"
+              sx={{ color: "text.secondary" }}
+            >
+              {resolvedMode === "dark" ? (
+                <LightModeOutlinedIcon />
+              ) : (
+                <DarkModeOutlinedIcon />
+              )}
+            </IconButton>
+          </Tooltip>
 
           <IconButton
             onClick={() => navigate("/profile")}
             aria-label="profile"
-            sx={{ ml: isMobile ? 1 : 2 }}
+            sx={{ ml: isMobile ? 0.5 : 1 }}
           >
             <Avatar
               sx={{
@@ -98,6 +149,7 @@ const Header = ({
                 height: 32,
                 fontSize: "0.875rem",
                 bgcolor: "primary.main",
+                color: "primary.contrastText",
               }}
             >
               {getInitials(activeAccount?.name || "User")}

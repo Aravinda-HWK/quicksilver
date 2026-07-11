@@ -25,19 +25,42 @@ const SearchBar = ({ onSearch, placeholder = "Search..." }) => {
     <Paper
       component="form"
       onSubmit={(e) => e.preventDefault()}
-      sx={{
-        p: "2px 8px",
+      elevation={0}
+      sx={(theme) => ({
+        px: 1.5,
+        py: "3px",
         display: "flex",
         alignItems: "center",
-        backgroundColor: "action.hover",
-        boxShadow: "none",
+        borderRadius: "8px",
+        backgroundColor: "background.paper",
         border: 1,
-        borderColor: "divider",
-      }}
+        borderColor: "rgba(185, 202, 203, 0.5)", // outline-variant hairline
+        transition: "border-color 0.2s, box-shadow 0.2s, background-color 0.2s",
+        ...theme.applyStyles("dark", {
+          backgroundColor: "rgba(255, 255, 255, 0.05)",
+          borderColor: "rgba(255, 255, 255, 0.10)",
+        }),
+        "&:focus-within": {
+          borderColor: "rgba(0, 242, 255, 0.5)",
+          boxShadow: "0 0 0 3px rgba(0, 242, 255, 0.15)",
+          ...theme.applyStyles("dark", {
+            backgroundColor: "rgba(255, 255, 255, 0.05)",
+            borderColor: "rgba(0, 242, 255, 0.4)",
+            boxShadow: "0 0 0 3px rgba(0, 242, 255, 0.12)",
+          }),
+        },
+      })}
     >
-      <SearchIcon sx={{ color: "text.secondary", mr: 1 }} />
+      <SearchIcon
+        sx={(theme) => ({
+          color: "rgba(0, 105, 111, 0.6)",
+          mr: 1,
+          fontSize: 20,
+          ...theme.applyStyles("dark", { color: "rgba(0, 242, 255, 0.6)" }),
+        })}
+      />
       <InputBase
-        sx={{ ml: 1, flex: 1 }}
+        sx={{ flex: 1, fontSize: "0.9375rem" }}
         placeholder={placeholder}
         value={value}
         onChange={handleChange}
@@ -49,7 +72,7 @@ const SearchBar = ({ onSearch, placeholder = "Search..." }) => {
           aria-label="clear search"
           size="small"
         >
-          <CloseIcon />
+          <CloseIcon fontSize="small" />
         </IconButton>
       )}
     </Paper>

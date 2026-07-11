@@ -117,7 +117,8 @@ const ThreadList = ({
         height: "100%",
         display: "flex",
         flexDirection: "column",
-        backgroundColor: "background.paper",
+        // The pane behind the list provides the glass surface in both schemes.
+        backgroundColor: "transparent",
       }}
     >
       {showBar && (

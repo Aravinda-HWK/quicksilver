@@ -7,11 +7,18 @@ import AttachmentViewer from "./AttachmentViewer";
 import { isRichHtml } from "../../nonview/email/htmlKind";
 import { stripQuotedText } from "../../nonview/email/quotedText";
 
+// Corner radii for bubble stacks: the sender-side corners of grouped bubbles
+// shrink so consecutive messages visually "fuse" (DESIGN.md, Shapes).
+const RADIUS = 18;
+const FUSED_RADIUS = 6;
+
 const MessageBubble = ({
   message,
   isSent,
   onDownloadAttachment,
   onFetchAttachment,
+  isFirstInGroup = true,
+  isLastInGroup = true,
 }) => {
   // Full HTML email bodies are documents, not chat messages — they need the
   // whole column width. Plain-text replies stay in the narrow chat-bubble look.
@@ -74,20 +81,81 @@ const MessageBubble = ({
     setPreview(null);
   };
 
+  // Fused corners: outer corners keep the full radius; the sender-side corners
+  // between grouped bubbles shrink. CSS order is TL TR BR BL.
+  const topFuse = isFirstInGroup ? RADIUS : FUSED_RADIUS;
+  const bottomFuse = isLastInGroup ? RADIUS : FUSED_RADIUS;
+  const bubbleRadius = isSent
+    ? `${RADIUS}px ${topFuse}px ${bottomFuse}px ${RADIUS}px`
+    : `${topFuse}px ${RADIUS}px ${RADIUS}px ${bottomFuse}px`;
+
   return (
     <Box
-      sx={{
-        alignSelf: isSent ? "flex-end" : "flex-start",
-        backgroundColor: "background.paper",
-        color: "text.primary",
-        borderRadius: 2,
-        px: 2,
-        py: 1.5,
-        width: "fit-content",
-        maxWidth: rich ? "100%" : "75%",
-        minWidth: 0,
-        boxShadow: 1,
-      }}
+      sx={(theme) =>
+        rich
+          ? {
+              // Rich HTML emails are documents, not chat lines: full-width
+              // card on an always-light surface so the email's own colors
+              // stay readable in dark mode too.
+              alignSelf: "stretch",
+              // "High-clarity card": near-opaque white with a hairline teal
+              // cyber-border instead of a heavy shadow (DESIGN.md).
+              backgroundColor: "rgba(255, 255, 255, 0.85)",
+              color: "#191C1E",
+              border: "1px solid rgba(0, 105, 111, 0.10)",
+              borderRadius: "16px",
+              px: 2.5,
+              py: 2,
+              width: "auto",
+              maxWidth: "100%",
+              minWidth: 0,
+              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.03)",
+              ...theme.applyStyles("dark", {
+                backgroundColor: "#FFFFFF",
+                borderColor: "rgba(255, 255, 255, 0.14)",
+                boxShadow: "0 4px 16px rgba(0, 0, 0, 0.4)",
+                // The card stays light in dark mode, so its meta row (timestamp,
+                // read check, attachment labels) must not use the dark scheme's
+                // near-white text tokens.
+                "& .MuiTypography-root, & .MuiSvgIcon-root": {
+                  color: "#3A494B",
+                },
+              }),
+            }
+          : {
+              alignSelf: isSent ? "flex-end" : "flex-start",
+              // Glass bubbles with hairline cyber-borders: sent gets the pale
+              // electric-cyan tint, received stays white glass (DESIGN.md).
+              backgroundColor: isSent
+                ? "rgba(0, 242, 255, 0.12)"
+                : "rgba(255, 255, 255, 0.75)",
+              color: "text.primary",
+              border: isSent
+                ? "1px solid rgba(0, 105, 111, 0.12)"
+                : "1px solid rgba(0, 105, 111, 0.08)",
+              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.03)",
+              backdropFilter: "blur(10px)",
+              borderRadius: bubbleRadius,
+              px: 2,
+              py: 1.25,
+              width: "fit-content",
+              maxWidth: "75%",
+              minWidth: 0,
+              // Dark mode: glass bubbles over the deep-space wallpaper — sent
+              // gets a faint cyan tint and border, received a neutral glass.
+              ...theme.applyStyles("dark", {
+                backgroundColor: isSent
+                  ? "rgba(0, 242, 255, 0.08)"
+                  : "rgba(255, 255, 255, 0.07)",
+                color: "text.primary",
+                boxShadow: "none",
+                border: isSent
+                  ? "1px solid rgba(0, 242, 255, 0.18)"
+                  : "1px solid rgba(255, 255, 255, 0.10)",
+                backdropFilter: "blur(10px)",
+              }),
+            }
+      }
     >
       <MessageContent
         content={displayText}

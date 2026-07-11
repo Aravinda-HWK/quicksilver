@@ -34,7 +34,25 @@ const ThreadView = ({
   const groups = groupMessages(messages);
 
   return (
-    <Box sx={{ p: 2, display: "flex", flexDirection: "column" }}>
+    <Box
+      sx={{
+        px: { xs: 2, md: 3 },
+        py: 3,
+        display: "flex",
+        flexDirection: "column",
+        maxWidth: 960,
+        mx: "auto",
+        width: "100%",
+        boxSizing: "border-box",
+        "@keyframes qs-bubble-in": {
+          from: { opacity: 0, transform: "translateY(6px)" },
+          to: { opacity: 1, transform: "translateY(0)" },
+        },
+        "& > *": {
+          animation: "qs-bubble-in 0.25s ease both",
+        },
+      }}
+    >
       {groups.map((group, index) => (
         <MessageGroup
           key={`${group.sender?.id}-${index}`}
